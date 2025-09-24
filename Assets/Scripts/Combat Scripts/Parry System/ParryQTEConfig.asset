@@ -12,7 +12,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4323dba4490cbb7458f927ae98dc10e2, type: 3}
   m_Name: ParryQTEConfig
   m_EditorClassIdentifier: 
-  allowedKeys: 01000000
+  allowedKeys: 010000002100000012000000
   minDuration: 0.75
   maxDuration: 1.85
   successHalfWidthRange: {x: 0.08, y: 0.14}

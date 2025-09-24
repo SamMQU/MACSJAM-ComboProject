@@ -6,7 +6,7 @@ public enum BattlePhase
 {
     None,
     PlayerTurn,
-    EnemyTelegraph, // wind-up during which parry QTE runs
+    EnemyTelegraph,
     EnemyResolve,
     Victory,
     Defeat
@@ -20,18 +20,29 @@ public class TurnBattleController : MonoBehaviour
 
     [Header("Parry QTE")]
     [SerializeField] private ParryQTEController parryQTE;
-    [SerializeField, Tooltip("Seconds the QTE runs before the 'impact' moment.")]
-    private float qteLeadTime = 0.8f;
+
+    // QTE result gate
+    private QTEResult? lastParryResult;
+    private bool qteActive;
 
     [Header("Input (New Input System - Keyboard)")]
     [SerializeField] private Key keyBaseAttack = Key.A;
-    [SerializeField] private Key keyAbility1   = Key.Q;
-    [SerializeField] private Key keyAbility2   = Key.W;
-    [SerializeField] private Key keySkipTurn   = Key.S;
+    [SerializeField] private Key keyAbility1 = Key.Q;
+    [SerializeField] private Key keyAbility2 = Key.W;
+    [SerializeField] private Key keySkipTurn = Key.S;
 
     [Header("Enemy AI")]
     [SerializeField, Tooltip("Relative weight for choosing base attack vs abilities.")]
     private int enemyBaseAttackWeight = 50;
+    [Header("Combo")]
+    [SerializeField] private ComboSystem combo;
+
+    [Header("VFX")]
+    [SerializeField] private VFXManager vfx;
+    [SerializeField] private Renderer playerRenderer;
+    [SerializeField] private Renderer enemyRenderer;
+    [SerializeField] private Transform playerMuzzle; // optional spawn origin
+    [SerializeField] private Transform enemyMuzzle;  // optional spawn origin
 
     [Header("Debug")]
     [SerializeField] private bool logDebug = true;
@@ -39,25 +50,25 @@ public class TurnBattleController : MonoBehaviour
     private BattlePhase phase = BattlePhase.None;
     private System.Random rng;
     private bool waitingForPlayerChoice;
-    private bool qteActive;
     private int pendingEnemyDamage;
 
-    // Getters
     public BattlePhase Phase => phase;
 
     private void Awake()
     {
         if (rng == null)
             rng = new System.Random(unchecked(System.Environment.TickCount * 397) ^ System.Guid.NewGuid().GetHashCode());
-
-        if (parryQTE != null)
-            parryQTE.OnQTEFinished += HandleParryFinished;
+        if (parryQTE == null) parryQTE = FindObjectOfType<ParryQTEController>();
     }
 
-    private void OnDestroy()
+    private void OnEnable()
     {
-        if (parryQTE != null)
-            parryQTE.OnQTEFinished -= HandleParryFinished;
+        if (parryQTE != null) parryQTE.OnQTEFinished += HandleParryFinished;
+    }
+
+    private void OnDisable()
+    {
+        if (parryQTE != null) parryQTE.OnQTEFinished -= HandleParryFinished;
     }
 
     private void Start()
@@ -76,9 +87,7 @@ public class TurnBattleController : MonoBehaviour
     private void Update()
     {
         if (phase == BattlePhase.PlayerTurn && waitingForPlayerChoice)
-        {
             HandlePlayerInput();
-        }
     }
 
     // ---------- Player Turn ----------
@@ -88,28 +97,24 @@ public class TurnBattleController : MonoBehaviour
         var kb = Keyboard.current;
         if (kb == null) return;
 
-        // Base Attack
         if (kb[keyBaseAttack].wasPressedThisFrame)
         {
             StartCoroutine(DoPlayerBaseAttack());
             return;
         }
 
-        // Ability 1
         if (kb[keyAbility1].wasPressedThisFrame)
         {
             TryUseAbilityIndex(0);
             return;
         }
 
-        // Ability 2
         if (kb[keyAbility2].wasPressedThisFrame)
         {
             TryUseAbilityIndex(1);
             return;
         }
 
-        // Skip
         if (kb[keySkipTurn].wasPressedThisFrame)
         {
             StartCoroutine(DoPlayerSkipTurn());
@@ -148,10 +153,14 @@ public class TurnBattleController : MonoBehaviour
         waitingForPlayerChoice = false;
         if (logDebug) Debug.Log($"[Player] Base Attack for {player.BaseAttackDamage} dmg.");
         yield return PlayPlayerAttackAnim();
-        enemy.TakeDamage(player.BaseAttackDamage);
+
+        int raw = player.BaseAttackDamage;
+        int final = combo != null ? combo.ApplyMultiplier(raw) : raw;
+        enemy.TakeDamage(final);
+        combo?.AddDamageContribution(final);
+
 
         if (enemy.IsDead) { phase = BattlePhase.Victory; if (logDebug) Debug.Log("[Battle] Victory!"); yield break; }
-
         yield return StartEnemyTurn();
     }
 
@@ -159,10 +168,13 @@ public class TurnBattleController : MonoBehaviour
     {
         if (logDebug) Debug.Log($"[Player] Cast {ab.Name} for {ab.Damage} dmg (AP spent).");
         yield return PlayPlayerAbilityAnim(ab.Name);
-        enemy.TakeDamage(ab.Damage);
+
+        int raw = ab.Damage;
+        int final = combo != null ? combo.ApplyMultiplier(raw) : raw;
+        enemy.TakeDamage(final);
+        combo?.AddDamageContribution(final);
 
         if (enemy.IsDead) { phase = BattlePhase.Victory; if (logDebug) Debug.Log("[Battle] Victory!"); yield break; }
-
         yield return StartEnemyTurn();
     }
 
@@ -173,7 +185,7 @@ public class TurnBattleController : MonoBehaviour
         yield return StartEnemyTurn();
     }
 
-    // ---------- Enemy Turn + Parry ----------
+    // ---------- Enemy Turn (QTE → resolve → then VFX if fail) ----------
 
     private IEnumerator StartEnemyTurn()
     {
@@ -187,108 +199,95 @@ public class TurnBattleController : MonoBehaviour
 
         if (logDebug)
         {
-            string label = action.kind == TBEnemyCharacter.EnemyActionKind.Base
-                ? "Base Attack"
-                : $"Ability: {action.ability.Name}";
+            string label = action.kind == TBEnemyCharacter.EnemyActionKind.Base ? "Base Attack" : $"Ability: {action.ability.Name}";
             Debug.Log($"[Enemy] Telegraphing: {label} -> {pendingEnemyDamage} dmg");
         }
 
-        // Telegraph animation here if you have one
+        // Minimal wind-up
         yield return PlayEnemyTelegraphAnim();
 
-        // Start the parry QTE so the sweep reaches the impact near the end
+        // QTE gate
+        lastParryResult = null;
         if (parryQTE != null)
         {
             qteActive = true;
             parryQTE.StartQTE();
+            yield return new WaitUntil(() => !qteActive);
+        }
+        else
+        {
+            if (logDebug) Debug.LogWarning("[Battle] No ParryQTEController assigned. Treating as FAIL.");
+            lastParryResult = new QTEResult { success = false, quality = QTEHitQuality.Fail };
         }
 
-        // Wait until impact moment (qteLeadTime later)
-        float end = Time.time + Mathf.Max(0.1f, qteLeadTime);
-        while (Time.time < end && qteActive)
-            yield return null;
+        var result = lastParryResult ?? new QTEResult { success = false, quality = QTEHitQuality.Fail };
 
-        // If the QTE already finished (success/fail), HandleParryFinished will resolve. If not, we time out:
-        if (qteActive)
+        switch (result.quality)
         {
-            // Time-out means no button press -> treat as fail
-            if (logDebug) Debug.Log("[Parry] Timeout -> Fail (full damage).");
-            ResolveEnemyHit_ParryFail();
+            default:
+            case QTEHitQuality.Fail:
+                if (logDebug) Debug.Log("[Parry] Fail -> enemy hits (VFX + shake + flash) then damage.");
+                yield return EnemyDealDamageThenBackToPlayer(); // plays enemy slash VFX, then applies damage
+                break;
+
+            case QTEHitQuality.Success:
+                if (logDebug) Debug.Log("[Parry] Success -> negate damage, gain AP. (No enemy VFX)");
+                player.GainAP(player.APOnParrySuccess);
+                yield return BackToPlayer();
+                break;
+
+            case QTEHitQuality.Perfect:
+                if (logDebug) Debug.Log("[Parry] PERFECT -> negate damage, gain AP++, riposte VFX + damage.");
+                player.GainAP(player.APOnParryPerfect);
+                yield return EnemyRiposteThenBack();
+                break;
         }
     }
 
     private void HandleParryFinished(QTEResult result)
     {
-        if (!qteActive) return;
+        lastParryResult = result;
         qteActive = false;
-
-        switch (result.quality)
-        {
-            case QTEHitQuality.Fail:
-                if (logDebug) Debug.Log("[Parry] Fail -> take full damage.");
-                ResolveEnemyHit_ParryFail();
-                break;
-
-            case QTEHitQuality.Success:
-                if (logDebug) Debug.Log("[Parry] Success -> negate damage, gain AP.");
-                ResolveEnemyHit_ParrySuccess();
-                break;
-
-            case QTEHitQuality.Perfect:
-                if (logDebug) Debug.Log("[Parry] PERFECT -> negate damage, gain AP+, RIPOSTE!");
-                ResolveEnemyHit_ParryPerfect();
-                break;
-        }
     }
 
-    private void ResolveEnemyHit_ParryFail()
-    {
-        phase = BattlePhase.EnemyResolve;
-        StartCoroutine(EnemyDealDamageThenBackToPlayer());
-    }
-
-    private void ResolveEnemyHit_ParrySuccess()
-    {
-        phase = BattlePhase.EnemyResolve;
-        player.GainAP(player.APOnParrySuccess);
-        // no damage taken
-        StartCoroutine(BackToPlayerAfterEnemyAnimation());
-    }
-
-    private void ResolveEnemyHit_ParryPerfect()
-    {
-        phase = BattlePhase.EnemyResolve;
-        player.GainAP(player.APOnParryPerfect);
-        // no damage; plus riposte
-        StartCoroutine(EnemyRiposteThenBack());
-    }
+    // ---------- Resolution ----------
 
     private IEnumerator EnemyDealDamageThenBackToPlayer()
     {
+        // Spawn enemy slash now (after QTE) – this triggers camera shake + player hit flash in VFXManager
         yield return PlayEnemyStrikeAnim();
+
         player.TakeDamage(pendingEnemyDamage);
+        combo?.ResetOnPlayerHit();
 
-        if (player.IsDead) { phase = BattlePhase.Defeat; if (logDebug) Debug.Log("[Battle] Defeat..."); yield break; }
+        if (player.IsDead)
+        {
+            phase = BattlePhase.Defeat;
+            if (logDebug) Debug.Log("[Battle] Defeat...");
+            yield break;
+        }
 
-        yield return BackToPlayer();
-    }
-
-    private IEnumerator BackToPlayerAfterEnemyAnimation()
-    {
-        yield return PlayEnemyStrikeAnim(); // show the swing, but damage was negated
         yield return BackToPlayer();
     }
 
     private IEnumerator EnemyRiposteThenBack()
     {
-        // Enemy swings (negated)
-        yield return PlayEnemyStrikeAnim();
-
-        // Player ripostes
+        // Enemy attack was negated; spawn player's riposte slash and deal damage to enemy
         yield return PlayPlayerRiposteAnim();
-        enemy.TakeDamage(player.RiposteDamage);
 
-        if (enemy.IsDead) { phase = BattlePhase.Victory; if (logDebug) Debug.Log("[Battle] Victory!"); yield break; }
+        int raw = player.RiposteDamage;
+        int final = combo != null ? combo.ApplyMultiplier(raw) : raw;
+        enemy.TakeDamage(final);
+        combo?.AddDamageContribution(final);
+
+
+        if (enemy.IsDead)
+        {
+            phase = BattlePhase.Victory;
+            if (logDebug) Debug.Log("[Battle] Victory!");
+            yield break;
+        }
+
         yield return BackToPlayer();
     }
 
@@ -301,12 +300,70 @@ public class TurnBattleController : MonoBehaviour
         yield break;
     }
 
-    // ---------- Tiny animation stubs (replace with your anims/VFX) ----------
+    // ---------- VFX-backed "anim stubs" ----------
 
-    private IEnumerator PlayPlayerAttackAnim()  { yield return null; }
-    private IEnumerator PlayPlayerAbilityAnim(string name) { yield return null; }
-    private IEnumerator PlayPlayerSkipAnim()    { yield return null; }
-    private IEnumerator PlayEnemyTelegraphAnim(){ yield return null; }
-    private IEnumerator PlayEnemyStrikeAnim()   { yield return null; }
-    private IEnumerator PlayPlayerRiposteAnim() { yield return null; }
+    private IEnumerator PlayPlayerAttackAnim()
+    {
+        if (logDebug) Debug.Log("[VFX] Player Base Attack VFX");
+        PlayPlayerSlash();
+        yield return new WaitForSeconds(0.12f);
+    }
+
+    private IEnumerator PlayPlayerAbilityAnim(string name)
+    {
+        if (logDebug) Debug.Log($"[VFX] Player Ability '{name}' VFX");
+        PlayPlayerSlash();
+        yield return new WaitForSeconds(0.12f);
+    }
+
+    private IEnumerator PlayPlayerSkipAnim()
+    {
+        yield return null;
+    }
+
+    private IEnumerator PlayEnemyTelegraphAnim()
+    {
+        // Keep light; the post-QTE slash is the main visual
+        yield return new WaitForSeconds(0.2f);
+    }
+
+    private IEnumerator PlayEnemyStrikeAnim()
+    {
+        if (logDebug) Debug.Log("[VFX] Enemy Strike VFX");
+        PlayEnemySlash();
+        yield return new WaitForSeconds(0.12f);
+    }
+
+    private IEnumerator PlayPlayerRiposteAnim()
+    {
+        if (logDebug) Debug.Log("[VFX] Player Riposte VFX");
+        PlayPlayerSlash(true);
+        yield return new WaitForSeconds(0.12f);
+    }
+
+    // ---------- VFX triggers ----------
+
+    private void PlayPlayerSlash(bool riposte = false)
+    {
+        if (vfx == null) { if (logDebug) Debug.LogWarning("[VFX] VFXManager not assigned."); return; }
+        if (enemy == null) { if (logDebug) Debug.LogWarning("[VFX] Enemy missing."); return; }
+
+        Vector3 from = playerMuzzle != null ? playerMuzzle.position : player.transform.position + Vector3.right * 0.35f;
+        Vector3 to = enemy.transform.position + Vector3.left * 0.20f;
+
+        // Slash enemy; VFXManager will flash enemy & shake camera
+        vfx.SlashSprite(from, to, enemyRenderer);
+    }
+
+    private void PlayEnemySlash()
+    {
+        if (vfx == null) { if (logDebug) Debug.LogWarning("[VFX] VFXManager not assigned."); return; }
+        if (player == null) { if (logDebug) Debug.LogWarning("[VFX] Player missing."); return; }
+
+        Vector3 from = enemyMuzzle != null ? enemyMuzzle.position : enemy.transform.position + Vector3.left * 0.35f;
+        Vector3 to = player.transform.position + Vector3.right * 0.20f;
+
+        // Slash player; VFXManager will flash player & shake camera
+        vfx.SlashSprite(from, to, playerRenderer);
+    }
 }

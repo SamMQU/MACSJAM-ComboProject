@@ -14,9 +14,10 @@ public abstract class TBCharacterBase : MonoBehaviour
     private int currentHP;
 
     // Events
-    public event Action<TBCharacterBase, int> OnDamaged;  // (target, amount)
-    public event Action<TBCharacterBase, int> OnHealed;   // (target, amount)
+    public event Action<TBCharacterBase, int> OnDamaged;     // (target, amount)
+    public event Action<TBCharacterBase, int> OnHealed;      // (target, amount)
     public event Action<TBCharacterBase> OnDied;
+    public event Action<TBCharacterBase, int, int> OnHealthChanged; // (target, current, max)
 
     // Getters
     public string DisplayName => displayName;
@@ -27,11 +28,14 @@ public abstract class TBCharacterBase : MonoBehaviour
     protected virtual void Awake()
     {
         currentHP = Mathf.Clamp(startingHP, 0, maxHP);
+        // fire once so UI initializes correctly
+        OnHealthChanged?.Invoke(this, currentHP, maxHP);
     }
 
     public virtual void ResetToFull()
     {
         currentHP = maxHP;
+        OnHealthChanged?.Invoke(this, currentHP, maxHP);
     }
 
     public virtual void TakeDamage(int amount)
@@ -41,7 +45,9 @@ public abstract class TBCharacterBase : MonoBehaviour
 
         int before = currentHP;
         currentHP = Mathf.Max(0, currentHP - dmg);
-        OnDamaged?.Invoke(this, dmg);
+
+        OnDamaged?.Invoke(this, currentHP < before ? (before - currentHP) : 0);
+        OnHealthChanged?.Invoke(this, currentHP, maxHP);
 
         if (before > 0 && currentHP == 0)
             OnDied?.Invoke(this);
@@ -54,6 +60,8 @@ public abstract class TBCharacterBase : MonoBehaviour
 
         int before = currentHP;
         currentHP = Mathf.Min(maxHP, currentHP + heal);
-        OnHealed?.Invoke(this, currentHP - before);
+
+        OnHealed?.Invoke(this, currentHP > before ? (currentHP - before) : 0);
+        OnHealthChanged?.Invoke(this, currentHP, maxHP);
     }
 }
