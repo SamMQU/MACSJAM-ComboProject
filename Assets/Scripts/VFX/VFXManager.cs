@@ -241,6 +241,111 @@ public class VFXManager : MonoBehaviour
         _onPerfectCallback = null;
         _hashReady = false;
     }
+    public void PlayCustomVFX(GameObject prefab, Vector3 from, Vector3 to, Renderer hitRenderer = null)
+    {
+        if (prefab == null) { SlashSprite(from, to, hitRenderer); return; }
+
+        float z = 0f;
+        if (hitRenderer != null) z = hitRenderer.transform.position.z;
+        else if (cameraShake != null) z = cameraShake.transform.position.z + 1f;
+
+        // position/orient roughly like SlashSprite
+        Vector3 pos = (from + to) * 0.5f; pos.z = z;
+
+        Quaternion rot = Quaternion.identity;
+        var dir = (to - from);
+        if (dir.sqrMagnitude > 1e-6f)
+        {
+            float zDeg = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f;
+            rot = Quaternion.Euler(0f, 0f, zDeg);
+        }
+
+        var inst = Instantiate(prefab, pos, rot);
+
+        // make sure it renders above target if both are SpriteRenderers
+        var sr = inst.GetComponentInChildren<SpriteRenderer>();
+        var hitSR = hitRenderer ? hitRenderer.GetComponent<SpriteRenderer>() : null;
+        if (sr != null && hitSR != null)
+        {
+            sr.sortingLayerID = hitSR.sortingLayerID;
+            sr.sortingOrder = hitSR.sortingOrder + 5;
+        }
+
+        if (slashTTL > 0f) inst.AddComponent<VFXTimedDespawn>().Init(slashTTL);
+        if (hitRenderer != null) FlashHit(hitRenderer);
+        Shake();
+    }
+    // 1) Force spawn at the target's position/bounds center
+    public void PlayCustomVFXAtTarget(GameObject prefab, Renderer targetRenderer)
+    {
+        if (prefab == null && slashPrefab == null) return;
+
+        // Position: target center (fallback to transform)
+        Vector3 pos = targetRenderer ? targetRenderer.bounds.center : Vector3.zero;
+        float z = targetRenderer ? targetRenderer.transform.position.z
+                                 : (cameraShake ? cameraShake.transform.position.z + 1f : 0f);
+        pos.z = z;
+
+        // Rotation: none (or face camera); adjust if your prefab expects direction
+        Quaternion rot = Quaternion.identity;
+
+        var inst = Instantiate(prefab != null ? prefab : slashPrefab, pos, rot);
+
+        // Sort above target
+        var sr = inst.GetComponentInChildren<SpriteRenderer>();
+        var hitSR = targetRenderer ? targetRenderer.GetComponent<SpriteRenderer>() : null;
+        if (sr != null && hitSR != null)
+        {
+            sr.sortingLayerID = hitSR.sortingLayerID;
+            sr.sortingOrder = hitSR.sortingOrder + 5;
+        }
+
+        if (slashTTL > 0f) inst.AddComponent<VFXTimedDespawn>().Init(slashTTL);
+
+        if (targetRenderer != null) FlashHit(targetRenderer);
+        Shake();
+    }
+
+    // 2) Same idea but using your existing slash logic with a per-call placement override
+    public void SlashSpriteWithPlacement(Vector3 from, Vector3 to, Renderer hitRenderer, SlashPlaceMode modeOverride)
+    {
+        // Temporarily compute position using the override
+        float z = hitRenderer ? hitRenderer.transform.position.z
+                              : (cameraShake ? cameraShake.transform.position.z + 1f : 0f);
+
+        Vector3 pos;
+        switch (modeOverride)
+        {
+            case SlashPlaceMode.AtSource: pos = from; break;
+            case SlashPlaceMode.AtTarget: pos = to; break;
+            case SlashPlaceMode.FractionAlongLine: pos = Vector3.Lerp(from, to, Mathf.Clamp01(placeT)); break;
+            default: pos = (from + to) * 0.5f; break;
+        }
+        pos.z = z;
+
+        Quaternion rot = ComputeRotation(from, to);
+        float scl = ComputeScale(from, to);
+
+        if (slashPrefab != null)
+        {
+            var inst = Instantiate(slashPrefab, pos, rot);
+
+            var sr = inst.GetComponentInChildren<SpriteRenderer>();
+            var hitSR = hitRenderer ? hitRenderer.GetComponent<SpriteRenderer>() : null;
+            if (sr != null && hitSR != null)
+            {
+                sr.sortingLayerID = hitSR.sortingLayerID;
+                sr.sortingOrder = hitSR.sortingOrder + 5;
+            }
+
+            if (scaleByDistance) inst.transform.localScale *= scl;
+            if (slashTTL > 0f) inst.AddComponent<VFXTimedDespawn>().Init(slashTTL);
+        }
+
+        if (hitRenderer != null) FlashHit(hitRenderer);
+        Shake();
+    }
+
 
     // ---------------- Internals ----------------
 

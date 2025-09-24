@@ -12,12 +12,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 4323dba4490cbb7458f927ae98dc10e2, type: 3}
   m_Name: ParryQTEConfig
   m_EditorClassIdentifier: 
-  allowedKeys: 010000002100000012000000
-  minDuration: 0.75
-  maxDuration: 1.85
-  successHalfWidthRange: {x: 0.08, y: 0.14}
-  perfectOfSuccessRange: {x: 0.4, y: 0.5}
-  randomizeWindowCenter: 1
-  fixedWindowCenter: 0.5
-  randomizeKey: 1
-  randomizeDuration: 1
+  AllowedKeys: 010000002100000012000000
+  RandomizeKey: 1
+  DurationRange: {x: 0.7, y: 1.15}
+  SuccessHalfRange: {x: 0.08, y: 0.16}
+  PerfectRatioMin: 0.3
+  PerfectRatioMax: 0.45
+  MinWindowStartFraction: 0.3

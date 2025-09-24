@@ -7,11 +7,15 @@ public class EnemyAbility
     [SerializeField] private string abilityName = "Enemy Skill";
     [SerializeField] private int damage = 9;
     [Range(0, 100)]
-    [SerializeField] private int chanceWeight = 50; // relative weight (not %)
+    [SerializeField] private int chanceWeight = 50;
+
+    [Header("VFX")]
+    [SerializeField] private GameObject vfxPrefab;  // optional
 
     public string Name => abilityName;
     public int Damage => Mathf.Max(0, damage);
     public int Weight => Mathf.Max(0, chanceWeight);
+    public GameObject VFXPrefab => vfxPrefab;
 }
 
 public class TBEnemyCharacter : TBCharacterBase

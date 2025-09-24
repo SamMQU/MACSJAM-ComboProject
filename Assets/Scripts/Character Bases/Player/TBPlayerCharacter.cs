@@ -8,10 +8,19 @@ public class PlayerAbility
     [SerializeField] private int apCost = 2;
     [SerializeField] private int damage = 8;
 
-    public string Name  => abilityName;
-    public int APCost   => Mathf.Max(0, apCost);
-    public int Damage   => Mathf.Max(0, damage);
+    [Header("Healing (optional)")]
+    [SerializeField] private int healAmount = 0;  // new field
+
+    [Header("VFX")]
+    [SerializeField] private GameObject vfxPrefab;  // optional, assign per ability in Inspector
+
+    public string Name => abilityName;
+    public int APCost => Mathf.Max(0, apCost);
+    public int Damage => Mathf.Max(0, damage);
+    public int HealAmount => Mathf.Max(0, healAmount);
+    public GameObject VFXPrefab => vfxPrefab;
 }
+
 
 public class TBPlayerCharacter : TBCharacterBase, APBarBinder.IAPSource
 {
@@ -37,16 +46,16 @@ public class TBPlayerCharacter : TBCharacterBase, APBarBinder.IAPSource
     private int currentAP;
 
     // ---- Public API / Getters ----
-    public int BaseAttackDamage   => Mathf.Max(0, baseAttackDamage);
-    public int RiposteDamage      => Mathf.Max(0, riposteDamage);
-    public int APOnParrySuccess   => Mathf.Max(0, apOnParrySuccess);
-    public int APOnParryPerfect   => Mathf.Max(0, apOnParryPerfect);
+    public int BaseAttackDamage => Mathf.Max(0, baseAttackDamage);
+    public int RiposteDamage => Mathf.Max(0, riposteDamage);
+    public int APOnParrySuccess => Mathf.Max(0, apOnParrySuccess);
+    public int APOnParryPerfect => Mathf.Max(0, apOnParryPerfect);
     public PlayerAbility[] Abilities => abilities;
 
     // IAPSource (for APBarBinder)
     public int MaxAP => maxAP;
     public int CurrentAP => currentAP;
-    public event Action<int,int> OnAPChanged; // (current, max)
+    public event Action<int, int> OnAPChanged; // (current, max)
 
     protected override void Awake()
     {

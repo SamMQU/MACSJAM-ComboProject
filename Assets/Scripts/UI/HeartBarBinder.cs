@@ -2,8 +2,9 @@ using UnityEngine;
 
 public class HeartBarBinder : MonoBehaviour
 {
-    [SerializeField] private TBCharacterBase character; // player or enemy
+    [SerializeField] private TBCharacterBase character; // current target
     [SerializeField] private HeartBarUI heartBar;
+    [SerializeField] private bool logDebug = false;
 
     private void Awake()
     {
@@ -13,22 +14,48 @@ public class HeartBarBinder : MonoBehaviour
 
     private void OnEnable()
     {
-        if (!character || !heartBar) return;
-
-        // initialize once (covers scene load)
-        heartBar.SetMaxHP(character.MaxHP, character.CurrentHP);
-
-        character.OnHealthChanged += HandleHPChanged;
+        if (character != null) Subscribe(character);
     }
 
     private void OnDisable()
     {
-        if (character != null)
-            character.OnHealthChanged -= HandleHPChanged;
+        if (character != null) Unsubscribe(character);
+    }
+
+    public void BindCharacter(TBCharacterBase newChar)
+    {
+        // if (logDebug) Debug.Log($"[HeartBarBinder] BindCharacter -> {(newChar ? newChar.name : "null")}");
+        if (character == newChar) { ForceRefresh(); return; }
+
+        if (character != null) Unsubscribe(character);
+        character = newChar;
+
+        if (isActiveAndEnabled && character != null)
+            Subscribe(character);
+    }
+
+    public void ForceRefresh()
+    {
+        if (heartBar != null && character != null)
+            heartBar.SetMaxHP(character.MaxHP, character.CurrentHP);
+    }
+
+    private void Subscribe(TBCharacterBase c)
+    {
+        if (!heartBar || c == null) return;
+        heartBar.SetMaxHP(c.MaxHP, c.CurrentHP);   // immediate draw
+        c.OnHealthChanged += HandleHPChanged;
+        // if (logDebug) Debug.Log("[HeartBarBinder] Subscribed.");
+    }
+
+    private void Unsubscribe(TBCharacterBase c)
+    {
+        c.OnHealthChanged -= HandleHPChanged;
+        // if (logDebug) Debug.Log("[HeartBarBinder] Unsubscribed.");
     }
 
     private void HandleHPChanged(TBCharacterBase who, int cur, int max)
     {
-        if (heartBar) heartBar.SetMaxHP(max, cur);
+        if (heartBar != null) heartBar.SetMaxHP(max, cur);
     }
 }

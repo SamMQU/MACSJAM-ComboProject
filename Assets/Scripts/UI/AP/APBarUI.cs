@@ -43,7 +43,7 @@ public class APBarUI : MonoBehaviour
         if (container == null) container = (RectTransform)transform;
         if (pipTemplate == null)
         {
-            Debug.LogError("[APBarUI] Assign a disabled pipTemplate Image.");
+            // Debug.LogError("[APBarUI] Assign a disabled pipTemplate Image.");
             return;
         }
 

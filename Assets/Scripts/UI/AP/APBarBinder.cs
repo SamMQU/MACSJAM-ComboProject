@@ -19,8 +19,8 @@ public class APBarBinder : MonoBehaviour
     {
         if (!apBar) apBar = GetComponentInChildren<APBarUI>(true);
         source = apOwner as IAPSource;
-        if (source == null && apOwner != null)
-            Debug.LogError("[APBarBinder] apOwner does not implement IAPSource.");
+        // if (source == null && apOwner != null)
+            // Debug.LogError("[APBarBinder] apOwner does not implement IAPSource.");
     }
 
     private void OnEnable()

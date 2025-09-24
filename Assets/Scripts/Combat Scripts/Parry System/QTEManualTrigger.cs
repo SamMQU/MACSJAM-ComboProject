@@ -23,12 +23,12 @@ public class QTEManualTrigger : MonoBehaviour
         if (Keyboard.current[triggerKey].wasPressedThisFrame)
         {
             if (qte != null) qte.StartQTE();
-            else Debug.LogError("[QTEManualTrigger] No ParryQTEController found.");
+            // else Debug.LogError("[QTEManualTrigger] No ParryQTEController found.");
         }
     }
 
     private void OnFinished(QTEResult r)
     {
-        Debug.Log($"[QTEManualTrigger] Finished: success={r.success}, key={r.requiredKey}, acc={r.accuracy:0.00}");
+        // Debug.Log($"[QTEManualTrigger] Finished: success={r.success}, key={r.requiredKey}, acc={r.accuracy:0.00}");
     }
 }

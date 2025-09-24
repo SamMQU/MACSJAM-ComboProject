@@ -47,7 +47,7 @@ public class HeartBarUI : MonoBehaviour
         if (container == null) container = (RectTransform)transform;
         if (heartTemplate == null)
         {
-            Debug.LogError("[HeartBarUI] Assign a heartTemplate Image (disabled template child).");
+            // Debug.LogError("[HeartBarUI] Assign a heartTemplate Image (disabled template child).");
             return;
         }
 

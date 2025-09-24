@@ -45,12 +45,12 @@ public class ParryQTESampleDriver : MonoBehaviour
         // - Use result.accuracy to scale rewards (e.g., more AP for tighter hit).
         if (result.success)
         {
-            Debug.Log($"PARRY! Key {result.requiredKey} | accuracy {result.accuracy:0.00}");
+            // Debug.Log($"PARRY! Key {result.requiredKey} | accuracy {result.accuracy:0.00}");
             // TODO: Your parry reward logic here
         }
         else
         {
-            Debug.Log("Parry failed.");
+            // Debug.Log("Parry failed.");
             // TODO: Your damage application here
         }
     }

@@ -1,75 +1,81 @@
-using System;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-[CreateAssetMenu(menuName = "Combat/QTE/Parry QTE Config", fileName = "ParryQTEConfig")]
+[CreateAssetMenu(fileName = "ParryQTEConfig", menuName = "QTE/ParryQTEConfig")]
 public class ParryQTEConfig : ScriptableObject
 {
-    [Header("Allowed Keys")]
-    [SerializeField] private Key[] allowedKeys = new Key[] { Key.Z, Key.X, Key.C, Key.Space, Key.J, Key.K, Key.L };
+    [Header("Keys")]
+    [Tooltip("Keys the QTE will accept. If RandomizeKey is true, one is picked at random each time.")]
+    public Key[] AllowedKeys = new Key[] { Key.Space, Key.J, Key.K, Key.L };
+    public bool RandomizeKey = true;
 
-    [Header("Duration (seconds)")]
-    [SerializeField] private float minDuration = 1.0f;
-    [SerializeField] private float maxDuration = 1.4f;
+    [Header("Timing (seconds)")]
+    [Tooltip("Duration of the whole QTE sweep.")]
+    public Vector2 DurationRange = new Vector2(0.70f, 1.15f);
 
-    [Header("Success Band WIDTH (half, fraction of bar)")]
-    [SerializeField] private Vector2 successHalfWidthRange = new Vector2(0.08f, 0.14f);
+    [Header("Window Sizes (fractions of track length)")]
+    [Tooltip("Half-width of the SUCCESS band. Actual success width = 2 * SuccessHalf.")]
+    public Vector2 SuccessHalfRange = new Vector2(0.08f, 0.16f);
 
-    [Header("Perfect Band WIDTH (as fraction of success half)")]
-    [SerializeField] private Vector2 perfectOfSuccessRange = new Vector2(0.40f, 0.55f);
+    [Tooltip("PerfectHalf = SuccessHalf * random in [PerfectRatioMin..PerfectRatioMax].")]
+    [Range(0.05f, 0.95f)] public float PerfectRatioMin = 0.30f;
+    [Range(0.05f, 0.95f)] public float PerfectRatioMax = 0.45f;
 
-    [Header("Center Randomization")]
-    [SerializeField] private bool randomizeWindowCenter = true;
-    [SerializeField] private float fixedWindowCenter = 0.5f;
+    [Header("Window Placement")]
+    [Tooltip("Ensure the success window does NOT start in the first X% of the track. (e.g., 0.30 = first 30%)")]
+    [Range(0f, 1f)] public float MinWindowStartFraction = 0.30f;
 
-    [Header("Randomize Key & Duration")]
-    [SerializeField] private bool randomizeKey = true;
-    [SerializeField] private bool randomizeDuration = true;
-
-    public Key[] AllowedKeys => allowedKeys;
-    public float MinDuration => Mathf.Max(0.05f, minDuration);
-    public float MaxDuration => Mathf.Max(MinDuration, maxDuration);
-    public Vector2 SuccessHalfWidthRange => new Vector2(Mathf.Clamp(successHalfWidthRange.x, 0f, 0.49f),
-                                                        Mathf.Clamp(successHalfWidthRange.y, 0f, 0.49f));
-    public Vector2 PerfectOfSuccessRange => new Vector2(Mathf.Clamp01(perfectOfSuccessRange.x),
-                                                        Mathf.Clamp01(perfectOfSuccessRange.y));
-    public bool RandomizeWindowCenter => randomizeWindowCenter;
-    public float FixedWindowCenter => Mathf.Clamp01(fixedWindowCenter);
-    public bool RandomizeKey => randomizeKey;
-    public bool RandomizeDuration => randomizeDuration;
-
-    public Key PickKey(System.Random rng)
-    {
-        if (allowedKeys == null || allowedKeys.Length == 0) return Key.Space;
-        return allowedKeys[rng.Next(0, allowedKeys.Length)];
-    }
+    // --------- API used by ParryQTEController ---------
 
     public float PickDuration(System.Random rng)
     {
-        if (!randomizeDuration) return (MinDuration + MaxDuration) * 0.5f;
-        return Mathf.Lerp(MinDuration, MaxDuration, (float)rng.NextDouble());
+        return RandRange(rng, DurationRange.x, DurationRange.y);
     }
 
     public float PickSuccessHalf(System.Random rng)
     {
-        var r = SuccessHalfWidthRange;
-        return Mathf.Lerp(r.x, r.y, (float)rng.NextDouble());
+        return Mathf.Clamp01(RandRange(rng, SuccessHalfRange.x, SuccessHalfRange.y));
     }
 
     public float PickPerfectHalf(float successHalf, System.Random rng)
     {
-        var r = PerfectOfSuccessRange;
-        float mul = Mathf.Lerp(r.x, r.y, (float)rng.NextDouble());
-        return Mathf.Clamp(mul * successHalf, 0f, successHalf);
+        float rMin = Mathf.Min(PerfectRatioMin, PerfectRatioMax);
+        float rMax = Mathf.Max(PerfectRatioMin, PerfectRatioMax);
+        float ratio = RandRange(rng, rMin, rMax);
+        return Mathf.Clamp01(successHalf * ratio);
     }
 
-    // ✅ Random center across the bar, while keeping the full band inside [0..1]
+    /// <summary>
+    /// Pick a center so that:
+    /// - start of success window (center - sH) >= MinWindowStartFraction
+    /// - end of success window (center + sH) <= 1
+    /// </summary>
     public float PickCenter(float successHalf, System.Random rng)
     {
-        if (!randomizeWindowCenter) return FixedWindowCenter;
-        float minC = successHalf;        // so (center - half) >= 0
-        float maxC = 1f - successHalf;   // so (center + half) <= 1
-        if (maxC <= minC) return 0.5f;   // degenerate safety
-        return Mathf.Lerp(minC, maxC, (float)rng.NextDouble());
+        float minCenter = MinWindowStartFraction + successHalf;
+        float maxCenter = 1f - successHalf;
+
+        if (minCenter > maxCenter)
+        {
+            // If impossible (window too big for constraints), clamp to the only feasible point.
+            float mid = Mathf.Clamp01((MinWindowStartFraction + 1f) * 0.5f);
+            return Mathf.Clamp01(mid);
+        }
+
+        return RandRange(rng, minCenter, maxCenter);
+    }
+
+    public Key PickKey(System.Random rng)
+    {
+        if (AllowedKeys == null || AllowedKeys.Length == 0) return Key.Space;
+        int i = rng.Next(0, AllowedKeys.Length);
+        return AllowedKeys[i];
+    }
+
+    // --------- helpers ---------
+    private static float RandRange(System.Random rng, float a, float b)
+    {
+        if (a > b) { var t = a; a = b; b = t; }
+        return a + (float)rng.NextDouble() * (b - a);
     }
 }

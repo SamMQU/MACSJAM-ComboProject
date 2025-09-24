@@ -24,7 +24,7 @@ public class HitFlash2D : MonoBehaviour
                 Shader sh = Shader.Find("Sprites/Default");
                 if (sh == null)
                 {
-                    Debug.LogWarning("[HitFlash2D] Could not find 'Sprites/Default' shader. Please assign a material on the Renderer.");
+                    // Debug.LogWarning("[HitFlash2D] Could not find 'Sprites/Default' shader. Please assign a material on the Renderer.");
                     return;
                 }
                 runtimeMat = new Material(sh);

@@ -28,7 +28,10 @@ public class ParryQTEController : MonoBehaviour
     private QTEState state = QTEState.Idle;
     private float startTime, duration, center, successHalf, perfectHalf;
     private Key requiredKey = Key.Space;
-    private System.Random rng;  // ✅ persist across runs
+    private System.Random rng;
+
+    // NEW: guard to ensure we emit only once
+    private bool hasEmitted;
 
     public event Action OnQTEStarted;
     public event Action<float> OnQTEProgress;
@@ -45,10 +48,9 @@ public class ParryQTEController : MonoBehaviour
     {
         if (config == null)
         {
-            Debug.LogWarning("[ParryQTEController] No config assigned; creating default.");
+            // Debug.LogWarning("[ParryQTEController] No config assigned; creating default.");
             config = ScriptableObject.CreateInstance<ParryQTEConfig>();
         }
-        // ✅ Seed once
         if (rng == null)
         {
             rng = (randomSeed >= 0)
@@ -64,25 +66,39 @@ public class ParryQTEController : MonoBehaviour
         float p = Progress;
         OnQTEProgress?.Invoke(p);
 
+        // 1) GIVE KEY PRESS PRIORITY OVER TIMEOUT
+        if (Keyboard.current != null && TryGetPressedAllowedKey(out var pressed))
+        {
+            // Optional choice:
+            // A) Wrong keys = ignore (recommended to avoid accidental fails):
+            if (pressed != requiredKey)
+            {
+                // ignore wrong key and keep running
+                // return; // uncomment if you want to consume the event; otherwise let it continue
+            }
+            else
+            {
+                var q = GetQuality(p);
+                if (q == QTEHitQuality.Fail)
+                {
+                    Finish(false, QTEHitQuality.Fail, 0f, Time.time - startTime);
+                }
+                else
+                {
+                    Finish(true, q, ComputeAccuracy(p), Time.time - startTime);
+                }
+                return;
+            }
+
+            // B) If you prefer Undertale-style instant fail on wrong key, use this instead of the block above:
+            // if (pressed != requiredKey) { Finish(false, QTEHitQuality.Fail, 0f, Time.time - startTime); return; }
+        }
+
+        // 2) Only if no key press this frame, check timeout
         if (p >= 1f)
         {
             Finish(false, QTEHitQuality.Fail, 0f, -1f);
             return;
-        }
-
-        if (Keyboard.current != null && TryGetPressedAllowedKey(out var pressed))
-        {
-            if (pressed != requiredKey)
-            {
-                Finish(false, QTEHitQuality.Fail, 0f, Time.time - startTime);
-                return;
-            }
-
-            var q = GetQuality(p);
-            if (q == QTEHitQuality.Fail)
-                Finish(false, QTEHitQuality.Fail, 0f, Time.time - startTime);
-            else
-                Finish(true, q, ComputeAccuracy(p), Time.time - startTime);
         }
     }
 
@@ -93,17 +109,28 @@ public class ParryQTEController : MonoBehaviour
         duration    = config.PickDuration(rng);
         successHalf = config.PickSuccessHalf(rng);
         perfectHalf = config.PickPerfectHalf(successHalf, rng);
-        center      = config.PickCenter(successHalf, rng);  // ✅ random spot along bar
-        requiredKey = config.RandomizeKey ? config.PickKey(rng) : (config.AllowedKeys.Length > 0 ? config.AllowedKeys[0] : Key.Space);
+
+        // Enforce "not in first 30%" in LOGIC too (not just visuals)
+        float minStart = Mathf.Clamp01(config.MinWindowStartFraction); // add this float to your config (default 0.30)
+        float minCenter = minStart + successHalf;
+
+        float pickedCenter = config.PickCenter(successHalf, rng);
+        center = Mathf.Max(pickedCenter, minCenter);
+        center = Mathf.Clamp01(center);
+
+        requiredKey = config.RandomizeKey
+            ? config.PickKey(rng)
+            : (config.AllowedKeys.Length > 0 ? config.AllowedKeys[0] : Key.Space);
 
         startTime = Time.time;
         state = QTEState.Running;
+        hasEmitted = false; // reset guard
 
         if (logDebug)
         {
             float s0 = Mathf.Clamp01(center - successHalf);
             float s1 = Mathf.Clamp01(center + successHalf);
-            Debug.Log($"[QTE] START key:{requiredKey} dur:{duration:0.00}s center:{center:0.000} success:[{s0:0.000}..{s1:0.000}]");
+            // Debug.Log($"[QTE] START key:{requiredKey} dur:{duration:0.00}s center:{center:0.000} success:[{s0:0.000}..{s1:0.000}]");
         }
 
         OnQTEStarted?.Invoke();
@@ -119,12 +146,16 @@ public class ParryQTEController : MonoBehaviour
 
     private void Finish(bool ok, QTEHitQuality qual, float acc, float hitTime)
     {
+        if (hasEmitted) return; // 3) DEBOUNCE
+        hasEmitted = true;
+
         state = ok ? QTEState.Succeeded : QTEState.Failed;
         Emit(ok, qual, acc, hitTime, state);
     }
 
     private void Emit(bool ok, QTEHitQuality qual, float acc, float hitTime, QTEState final)
     {
+        if (hasEmitted && final == QTEState.Running) return; // safety
         var r = new QTEResult
         {
             success = ok,
@@ -162,6 +193,8 @@ public class ParryQTEController : MonoBehaviour
         key = Key.None;
         var pool = config.AllowedKeys;
         if (Keyboard.current == null || pool == null || pool.Length == 0) return false;
+
+        // Scan for any press this frame
         for (int i = 0; i < pool.Length; i++)
         {
             var k = pool[i];
